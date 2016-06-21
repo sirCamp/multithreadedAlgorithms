@@ -1,45 +1,158 @@
-import java.util.Arrays;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Created by stefano on 14/06/16.
  */
-public class MergeSort {
+public class MergeSort implements Runnable {
 
+    private Integer[] init;
+    private Integer[] result;
+    private int p;
+    private int r;
+    private int s;
+    private ExecutorService executor = Executors.newCachedThreadPool();
+    private CountDownLatch doneSignal;
 
-
-    public static void main(String[] args)
-    {
-        final Integer[] a = {2, 6, 3, 5, 1};
-        final Integer[] b = new Integer[a.length];
-        pMergeSort(a,0,a.length-1,b,0,"ROOT");
-
-        /*Thread master = new Thread(){
-            public void run(){
-                pMergeSort(a, 1, a.length-1,b, 0,"ROOT");
-            }
-        };
-
-        master.start();
-        try {
-            master.join();
-            System.out.println("FINE: " +Arrays.toString(b));
-        }
-        catch (Exception e){
-
-        }*/
+    public MergeSort(Integer[] numbers, Integer[] _result, CountDownLatch latch) {
+        init = numbers;
+        result = _result;
+        doneSignal = latch;
+        r = numbers.length - 1;
     }
 
+    public MergeSort setP(int _p) {
+        p = _p;
+        return this;
+    }
+
+    public MergeSort setR(int _r) {
+        r = _r;
+        return this;
+    }
+
+    public MergeSort setS(int _s) {
+        s = _s;
+        return this;
+    }
+
+    public void run() {
+        sort();
+    }
+
+    public void sort() {
+        int n = r - p + 1;
+        if(n == 1)
+            result[s] = init[p];
+        else {
+            Integer[] T = new Integer[n];
+            int q  = (int) Math.floor((r+p)/2); // median value
+            int q1 = q - p + 1;                 // "normalized" second starting point
+            CountDownLatch myLatch = new CountDownLatch(2);
+            MergeSort ms1 = new MergeSort(init, T, myLatch);
+            ms1.setP(p).setR(q).setS(0);
+            MergeSort ms2 = new MergeSort(init, T, myLatch);
+            ms2.setP(q+1).setR(r).setS(q1);
+            executor.submit(ms1);
+            executor.submit(ms2);
+            try {
+                myLatch.await();
+            } catch(InterruptedException e) {
+                e.printStackTrace();
+            }
+            CountDownLatch mergeLatch = new CountDownLatch(1);
+            Merger merger = new Merger(T, result, mergeLatch);
+            merger.setP1(0).setR1(q1-1).setP2(q1).setR2(n-1).setP3(s);
+            executor.submit(merger);
+            try {
+                mergeLatch.await();
+            } catch(InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        doneSignal.countDown();
+    }
+
+    private class Merger implements Runnable {
+        private CountDownLatch doneSignal;
+        private int p1 = 0;
+        private int r1 = 0;
+        private int p2 = 0;
+        private int r2 = 0;
+        private int p3 = 0;
+        private Integer[] src;
+        private Integer[] dst;
+
+        public Merger setP1(int p1) {
+            this.p1 = p1;
+            return this;
+        }
+
+        public Merger setR1(int r1) {
+            this.r1 = r1;
+            return this;
+        }
+
+        public Merger setP2(int p2) {
+            this.p2 = p2;
+            return this;
+        }
+
+        public Merger setR2(int r2) {
+            this.r2 = r2;
+            return this;
+        }
+
+        public Merger setP3(int p3) {
+            this.p3 = p3;
+            return this;
+        }
+
+        public Merger(Integer[] _src, Integer[] _dst, CountDownLatch latch) {
+            src = _src;
+            dst = _dst;
+            doneSignal = latch;
+        }
+
+        public void run() {
+            int n1 = r1 - p1 + 1;
+            int n2 = r2 - p2 + 1;
+            if(n2 > n1) {
+                int aux = n1; n1 = n2;
+                aux = p1; p1 = p2; p2 = aux;
+                aux = r1; r1 = r2; r2 = aux;
+            }
+            if(n1 > 0) {
+                int q1 = (int) Math.floor((r1+p1)/2);
+                int q2 = binarySearch(src[q1], src, p2, r2);
+                int q3 = p3 + q1 - p1 + q2 - p2;
+                dst[q3] = src[q1];
+                CountDownLatch latch = new CountDownLatch(2);
+                Merger m1 = new Merger(src, dst, latch);
+                m1.setP1(p1).setR1(q1 - 1).setP2(p2).setR2(q2 - 1).setP3(p3);
+                Merger m2 = new Merger(src, dst, latch);
+                m2.setP1(q1 + 1).setR1(r1).setP2(q2).setR2(r2).setP3(q3 + 1);
+                executor.submit(m1);
+                executor.submit(m2);
+                try {
+                    latch.await();
+                } catch(InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            doneSignal.countDown();
+        }
+    }
 
     public static int binarySearch(int x, Integer[] t, int p, int r){
 
-        int low =p;
-        int high = Math.max(p,r+1);
+        int low = p;
+        int high = r+1;
 
-        while( low < high ){
-
-            int middle = (int)Math.floor((low+high)/2);
+        while(low < high){
+            int middle = (int) Math.floor((low+high)/2);
             if( x <= t[middle]){
-
                 high = middle;
             }
             else{
@@ -53,220 +166,4 @@ public class MergeSort {
 
     }
 
-
-    public static void pMerge(final Integer[] t, int p1_a,  int r1_a,  int p2_a,  int r2_a, final Integer[] a,final int p3){
-
-        int n1 = r1_a-p1_a+1;
-        int n2 = r2_a-p2_a+1;
-
-
-        if (n1 < n2){
-
-            int tmp_p = p1_a;
-            p1_a=p2_a;
-            p2_a=tmp_p;
-
-            int tmp_r1 = r1_a;
-            r1_a=r2_a;
-            r2_a=r1_a;
-
-            int tmp_n = n1;
-            n1=n2;
-            n2=tmp_n;
-        }
-
-        final int r1 = r1_a;
-        final int r2 = r2_a;
-        final int p1 = p1_a;
-        final int p2 = p2_a;
-
-
-        if(n1 == 0){
-            return;
-        }
-        else{
-
-
-            System.out.println("INVOCO IL MERGE: "+Arrays.toString(a));
-            final int q1 = (int)Math.floor((p1+r1)/2);
-
-            final int q2 = MergeSort.binarySearch(t[q1],t,p2,r2);
-            final int q3 = p3+(q1-p1)+(q2-p2);
-            a[q3] = t[q1];
-
-
-
-            Thread t1 = new Thread(){
-                public void run(){
-
-                    pMerge(t,p1,q1-1,p2,q2-1,a,p3);
-                }
-            };
-
-            Thread t2 = new Thread(){
-                public void run(){
-
-                    pMerge(t,q1+1,r1,q2,r2,a,q3+1);
-                }
-            };
-
-            t1.start();
-            t2.start();
-
-            try{
-
-                t1.join();
-                t2.join();
-            }
-            catch(Exception e){
-
-            }
-
-
-
-        }
-
-    }
-
-
-    public static void pMergeSort(final Integer[] a, final int p, final int r,final Integer[] b, final int s, String kind){
-        int n = r-p+1;
-
-        if(n==1){
-
-            System.out.println("SONO: "+kind+" s :"+s+" p: "+p+" b: "+b.length+" a: "+a.length+" r-p+1: "+(r-p+1)+" r:"+r+" q: "+p+" plus: "+1);
-
-           int news = s;
-           if(s == b.length) {
-               news = s - 1;
-           }
-
-           b[news] = a[p];
-           System.out.println("b[s]: "+b[news]);
-           System.out.println(Arrays.toString(b));
-
-        }
-        else{
-            final Integer[] t = new Integer[n];
-            for(int i=0; i<n; i++){
-                t[i] = 0;
-            }
-            final int q = (int)Math.floor((p+r)/2);
-            final int q1 = q-p+1;
-
-
-
-            Thread t1 = new Thread(){
-                public void run(){
-
-                    System.out.println("1: "+Arrays.toString(a)+" "+(p)+" "+q+" "+Arrays.toString(t)+" "+0);
-                    pMergeSort(a,p,q,t,1, "T1");
-                }
-            };
-
-            Thread t2 = new Thread(){
-                public void run(){
-
-
-                    System.out.println("2: "+Arrays.toString(a)+" "+(q+1)+" "+r+" "+Arrays.toString(t)+" "+(q1+1));
-                    pMergeSort(a,q+1,r,t,q1+1,"T2");
-
-                }
-            };
-
-            t1.start();
-            t2.start();
-
-            try{
-
-                t1.join();
-                t2.join();
-                pMerge(t,1,q1,q1+1,n,b,s);
-                System.out.println(Arrays.toString(b));
-            }
-            catch(Exception e){
-
-            }
-
-            return;
-
-        }
-    }
-
-    /*public static void mergeSort(final Integer[] a,final  int left, final int right){
-
-        if(left < right){
-
-            final int middle = (int)Math.floor((left+right)/2);
-
-            Thread t1 = new Thread(){
-
-                public void run(){
-                    mergeSort(a,left,middle);
-                }
-            };
-
-            Thread t2 = new Thread(){
-
-                public void run(){
-                    mergeSort(a,middle+1,right);
-                }
-            };
-
-            t1.start();
-            t2.start();
-
-            try{
-
-                t1.join();
-                t2.join();
-            }
-            catch (Exception e){
-
-                System.out.println("Something during margeSort was wrong... stopping all");
-                System.exit(1);
-            }
-
-
-            merge(a,left,middle,right);
-        }
-
-    }
-
-    private static void merge(Integer[] a,int left, int middle, int right )
-    {
-        int i = left;
-        int j = middle + 1;
-        int k = 0;
-        Integer[] b = new Integer[right-left+1];
-
-        while (i <= middle && j <= right) {
-            if(a[i]<=a[j]) {
-                b[k] = a[i];
-                i = i + 1;
-            }    
-            else {
-                b[k]=a[j];
-                j=j + 1;
-
-            }
-            k=k + 1;
-        }    
-
-        while(i <= middle) {
-            b[k] = a[i];
-            i = i + 1;
-            k = k + 1;
-        }
-
-        while( j <= right ) {
-            b[k] = a[j];
-            j = j + 1;
-            k = k + 1;
-        }
-
-        for( k = left; k <= right; k++){
-            a[k] = b[k - left];
-        }
-    }*/
 }
